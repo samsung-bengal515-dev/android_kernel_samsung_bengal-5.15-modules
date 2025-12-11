@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -267,10 +267,6 @@
 int wlan_start_ret_val;
 static DECLARE_COMPLETION(wlan_start_comp);
 static qdf_atomic_t wlan_hdd_state_fops_ref;
-#ifdef SEC_CONFIG_POWER_BACKOFF
-extern int cur_sec_sar_index;
-#endif /* SEC_CONFIG_POWER_BACKOFF */
-
 #ifndef MODULE
 static struct gwlan_loader *wlan_loader;
 static ssize_t wlan_boot_cb(struct kobject *kobj,
@@ -1766,7 +1762,6 @@ hdd_update_feature_cfg_club_get_sta_in_ll_stats_req(
 static void
 hdd_init_get_sta_in_ll_stats_config(struct hdd_adapter *adapter)
 {
-	adapter->hdd_stats.is_ll_stats_req_in_progress = false;
 	adapter->hdd_stats.sta_stats_cached_timestamp = 0;
 }
 #else
@@ -2333,6 +2328,7 @@ static void hdd_sar_target_config(struct hdd_context *hdd_ctx,
 				  struct wma_tgt_cfg *cfg)
 {
 	hdd_ctx->sar_version = cfg->sar_version;
+	hdd_ctx->sar_flag    = cfg->sar_flag;
 }
 
 static void hdd_update_vhtcap_2g(struct hdd_context *hdd_ctx)
@@ -4784,13 +4780,6 @@ int hdd_wlan_start_modules(struct hdd_context *hdd_ctx, bool reinit)
 		hdd_enable_power_management(hdd_ctx);
 
 		hdd_skip_acs_scan_timer_init(hdd_ctx);
-		
-#ifdef SEC_CONFIG_WLAN_BEACON_CHECK
-		qdf_mc_timer_init(&hdd_ctx->skip_bmiss_set_timer,
-			QDF_TIMER_TYPE_SW,
-			hdd_skip_bmiss_set_timer_handler,
-			hdd_ctx);
-#endif /* SEC_CONFIG_WLAN_BEACON_CHECK */
 
 		hdd_set_hif_init_phase(hif_ctx, false);
 		hdd_hif_set_enable_detection(hif_ctx, true);
@@ -4847,6 +4836,7 @@ cds_txrx_free:
 	cds_dp_close(hdd_ctx->psoc);
 
 close:
+	dispatcher_disable();
 	hdd_ctx->driver_status = DRIVER_MODULES_CLOSED;
 	hdd_info("Wlan transition aborted (now CLOSED)");
 
@@ -6280,7 +6270,7 @@ hdd_alloc_station_adapter(struct hdd_context *hdd_ctx, tSirMacAddr mac_addr,
 	qdf_atomic_init(&adapter->cache_sta_count);
 
 	/* Init the net_device structure */
-	strlcpy(dev->name, name, IFNAMSIZ);
+	strscpy(dev->name, name, IFNAMSIZ);
 
 	qdf_net_update_net_device_dev_addr(dev, mac_addr, sizeof(tSirMacAddr));
 	qdf_mem_copy(adapter->mac_addr.bytes, mac_addr, sizeof(tSirMacAddr));
@@ -6316,6 +6306,7 @@ hdd_alloc_station_adapter(struct hdd_context *hdd_ctx, tSirMacAddr mac_addr,
 	adapter->start_time = qdf_system_ticks();
 	adapter->last_time = adapter->start_time;
 
+	qdf_atomic_init(&adapter->hdd_stats.is_ll_stats_req_pending);
 	hdd_init_get_sta_in_ll_stats_config(adapter);
 
 	return adapter;
@@ -6808,14 +6799,6 @@ QDF_STATUS hdd_init_station_mode(struct hdd_adapter *adapter)
 
 	hdd_roam_profile_init(adapter);
 	hdd_register_wext(adapter->dev);
-
-	/* set fast roaming capability in sme session */
-	status = ucfg_user_space_enable_disable_rso(hdd_ctx->pdev,
-						    adapter->vdev_id,
-						    true);
-	if (QDF_IS_STATUS_ERROR(status))
-		hdd_err("ROAM_CONFIG: sme_config_fast_roaming failed with status=%d",
-			status);
 
 	/* Set the default operation channel freq*/
 	sta_ctx->conn_info.chan_freq = hdd_ctx->config->operating_chan_freq;
@@ -8153,14 +8136,55 @@ void hdd_ipa_ap_disconnect_evt(struct hdd_context *hdd_ctx,
 	}
 }
 
+#ifdef WLAN_FEATURE_NAN
+/**
+ * hdd_ndp_state_cleanup() - API to set NDP state to Disconnected
+ * @psoc: pointer to psoc object
+ * @ndi_vdev_id: vdev_id of the NDI
+ *
+ * Return: None
+ */
 static void
-hdd_peer_cleanup(struct hdd_context *hdd_ctx, struct hdd_adapter *adapter)
+hdd_ndp_state_cleanup(struct wlan_objmgr_psoc *psoc, uint8_t ndi_vdev_id)
+{
+	struct wlan_objmgr_vdev *ndi_vdev;
+
+	ndi_vdev = wlan_objmgr_get_vdev_by_id_from_psoc(psoc, ndi_vdev_id,
+							WLAN_NAN_ID);
+	if (!ndi_vdev) {
+		hdd_err("Cannot obtain NDI vdev object!");
+		return;
+	}
+
+	ucfg_nan_set_ndi_state(ndi_vdev, NAN_DATA_DISCONNECTED_STATE);
+
+	wlan_objmgr_vdev_release_ref(ndi_vdev, WLAN_NAN_ID);
+}
+
+/**
+ * hdd_ndp_peer_cleanup() - This API will delete NDP peer if exist and modifies
+ * the NDP state.
+ * @hdd_ctx: hdd context
+ * @adapter: hdd adapter
+ *
+ * Return: None
+ */
+static void
+hdd_ndp_peer_cleanup(struct hdd_context *hdd_ctx, struct hdd_adapter *adapter)
 {
 	QDF_STATUS qdf_status = QDF_STATUS_E_FAILURE;
 
 	/* Check if there is any peer present on the adapter */
-	if (!hdd_any_valid_peer_present(adapter))
+	if (!hdd_any_valid_peer_present(adapter)) {
+		/*
+		 * No peers are connected to the NDI. So, set the NDI state to
+		 * DISCONNECTED. If there are any peers, ucfg_nan_disable_ndi()
+		 * would take care of cleanup all the peers and setting the
+		 * state to DISCONNECTED.
+		 */
+		hdd_ndp_state_cleanup(hdd_ctx->psoc, adapter->vdev_id);
 		return;
+	}
 
 	if (adapter->device_mode == QDF_NDI_MODE)
 		qdf_status = ucfg_nan_disable_ndi(hdd_ctx->psoc,
@@ -8174,6 +8198,17 @@ hdd_peer_cleanup(struct hdd_context *hdd_ctx, struct hdd_adapter *adapter)
 	if (QDF_IS_STATUS_ERROR(qdf_status))
 		hdd_debug("peer_cleanup_done wait fail");
 }
+#else
+static inline void
+hdd_ndp_state_cleanup(struct wlan_objmgr_psoc *psoc, uint8_t ndi_vdev_id)
+{
+}
+
+static inline void
+hdd_ndp_peer_cleanup(struct hdd_context *hdd_ctx, struct hdd_adapter *adapter)
+{
+}
+#endif /* WLAN_FEATURE_NAN */
 
 #ifdef FUNC_CALL_MAP
 
@@ -8292,7 +8327,7 @@ QDF_STATUS hdd_stop_adapter_ext(struct hdd_context *hdd_ctx,
 
 			/* For NDI do not use roam_profile */
 			if (adapter->device_mode == QDF_NDI_MODE) {
-				hdd_peer_cleanup(hdd_ctx, adapter);
+				hdd_ndp_peer_cleanup(hdd_ctx, adapter);
 				status = sme_roam_ndi_stop(mac_handle,
 							   adapter->vdev_id);
 				if (QDF_IS_STATUS_SUCCESS(status)) {
@@ -9101,13 +9136,23 @@ QDF_STATUS hdd_start_all_adapters(struct hdd_context *hdd_ctx)
 		case QDF_P2P_DEVICE_MODE:
 		case QDF_NAN_DISC_MODE:
 
-			hdd_start_station_adapter(adapter);
-
+			ret = hdd_start_station_adapter(adapter);
+			if (ret) {
+				hdd_err("[SSR] Failed to start station adapter: %d",
+					ret);
+				hdd_adapter_dev_put_debug(adapter, dbgid);
+				continue;
+			}
 			if (adapter->device_mode == QDF_STA_MODE) {
 				ret = hdd_start_link_adapter(adapter);
-				if (ret)
-					hdd_err("[SSR] Failed to start link adapter:%d",
+				if (ret) {
+					hdd_err("[SSR] Failed to start link adapter: %d",
 						ret);
+					hdd_stop_adapter(hdd_ctx, adapter);
+					hdd_adapter_dev_put_debug(adapter,
+								  dbgid);
+					continue;
+				}
 			}
 
 			/* Open the gates for HDD to receive Wext commands */
@@ -9986,6 +10031,8 @@ void hdd_wlan_exit(struct hdd_context *hdd_ctx)
 		wlan_hdd_cfg80211_deinit(wiphy);
 		hdd_lpass_notify_stop(hdd_ctx);
 	}
+
+	wlan_hdd_free_iface_combination_mem(hdd_ctx);
 
 	hdd_deinit_regulatory_update_event(hdd_ctx);
 	hdd_exit_netlink_services(hdd_ctx);
@@ -12368,7 +12415,7 @@ int hdd_update_acs_timer_reason(struct hdd_adapter *adapter, uint8_t reason)
 	return status;
 }
 
-#ifdef FEATURE_WLAN_CH_AVOID_EXT
+#if defined(FEATURE_WLAN_CH_AVOID) && defined(FEATURE_WLAN_CH_AVOID_EXT)
 uint32_t wlan_hdd_get_restriction_mask(struct hdd_context *hdd_ctx)
 {
 	return hdd_ctx->restriction_mask;
@@ -14003,8 +14050,6 @@ static int hdd_update_cds_config(struct hdd_context *hdd_ctx)
 {
 	struct cds_config_info *cds_cfg;
 	int value;
-	uint8_t band_capability;
-	uint32_t band_bitmap;
 	uint8_t ito_repeat_count;
 	bool crash_inject;
 	bool self_recovery;
@@ -14069,12 +14114,6 @@ static int hdd_update_cds_config(struct hdd_context *hdd_ctx)
 
 	cds_cfg->ito_repeat_count = ito_repeat_count;
 
-	status = ucfg_mlme_get_band_capability(hdd_ctx->psoc, &band_bitmap);
-	if (QDF_IS_STATUS_ERROR(status))
-		goto exit;
-
-	band_capability = wlan_reg_band_bitmap_to_band_info(band_bitmap);
-	cds_cfg->bandcapability = band_capability;
 	cds_cfg->num_vdevs = hdd_ctx->config->num_vdevs;
 	cds_cfg->enable_tx_compl_tsf64 =
 		hdd_tsf_is_tsf64_tx_set(hdd_ctx);
@@ -15831,20 +15870,6 @@ int hdd_wlan_stop_modules(struct hdd_context *hdd_ctx, bool ftm_mode)
 
 	hdd_deinit_adapter_ops_wq(hdd_ctx);
 	hdd_bus_bandwidth_deinit(hdd_ctx);
-#ifdef SEC_CONFIG_POWER_BACKOFF
-	cur_sec_sar_index = 0;
-#endif /* SEC_CONFIG_POWER_BACKOFF */
-#ifdef SEC_CONFIG_WLAN_BEACON_CHECK
-	if (QDF_TIMER_STATE_RUNNING ==
-		qdf_mc_timer_get_current_state(&hdd_ctx->skip_bmiss_set_timer)) {
-		hdd_debug("Stop skip_bmiss_set_timer");
-		qdf_mc_timer_stop(&hdd_ctx->skip_bmiss_set_timer);
-	}
-
-	if (!QDF_IS_STATUS_SUCCESS
-	   (qdf_mc_timer_destroy(&hdd_ctx->skip_bmiss_set_timer)))
-		hdd_err("Cannot delete skip_bmiss_set_timer");
-#endif /* SEC_CONFIG_WLAN_BEACON_CHECK */
 	hdd_check_for_leaks(hdd_ctx, is_recovery_stop);
 	hdd_debug_domain_set(QDF_DEBUG_DOMAIN_INIT);
 
@@ -16370,18 +16395,23 @@ int hdd_wlan_startup(struct hdd_context *hdd_ctx)
 	hdd_driver_memdump_init();
 
 	hdd_dp_trace_init(hdd_ctx->config);
+	errno = wlan_hdd_alloc_iface_combination_mem(hdd_ctx);
+	if (errno) {
+		hdd_err("failed to alloc iface combination mem");
+		goto memdump_deinit;
+	}
 
 	errno = hdd_init_regulatory_update_event(hdd_ctx);
 	if (errno) {
 		hdd_err("Failed to initialize regulatory update event; errno:%d",
 			errno);
-		goto memdump_deinit;
+		goto free_iface_comb;
 	}
 
 	errno = hdd_wlan_start_modules(hdd_ctx, false);
 	if (errno) {
 		hdd_err("Failed to start modules; errno:%d", errno);
-		goto memdump_deinit;
+		goto free_iface_comb;
 	}
 
 	if (hdd_get_conparam() == QDF_GLOBAL_EPPING_MODE)
@@ -16440,6 +16470,9 @@ unregister_wiphy:
 
 stop_modules:
 	hdd_wlan_stop_modules(hdd_ctx, false);
+
+free_iface_comb:
+	wlan_hdd_free_iface_combination_mem(hdd_ctx);
 
 memdump_deinit:
 	hdd_driver_memdump_deinit();
@@ -17647,6 +17680,7 @@ int hdd_init(void)
 	wlan_init_bug_report_lock();
 
 #ifdef WLAN_LOGGING_SOCK_SVC_ENABLE
+	wlan_connectivity_logging_init();
 	wlan_logging_sock_init_svc();
 #endif
 
@@ -17899,6 +17933,18 @@ const struct file_operations wlan_hdd_state_fops = {
 	.release = wlan_hdd_state_ctrl_param_release,
 };
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 2, 0))
+static struct class *wlan_hdd_class_create(const char *name)
+{
+	return class_create(THIS_MODULE, name);
+}
+#else
+static struct class *wlan_hdd_class_create(const char *name)
+{
+	return class_create(name);
+}
+#endif
+
 static int  wlan_hdd_state_ctrl_param_create(void)
 {
 	unsigned int wlan_hdd_state_major = 0;
@@ -17916,8 +17962,7 @@ static int  wlan_hdd_state_ctrl_param_create(void)
 		goto dev_alloc_err;
 	}
 	wlan_hdd_state_major = MAJOR(device);
-
-	class = class_create(THIS_MODULE, WLAN_CTRL_NAME);
+	class = wlan_hdd_class_create(WLAN_CTRL_NAME);
 	if (IS_ERR(class)) {
 		pr_err("wlan_hdd_state class_create error");
 		goto class_err;

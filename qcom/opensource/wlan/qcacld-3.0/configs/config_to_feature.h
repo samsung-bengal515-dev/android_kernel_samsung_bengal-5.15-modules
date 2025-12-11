@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2023-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -278,13 +278,7 @@
 #define WMI_DBR_SUPPORT (1)
 #endif
 
-#ifndef CONFIG_CNSS_QCA6750
-#ifdef CONFIG_DIRECT_BUF_RX_ENABLE
-#define DBR_MULTI_SRNG_ENABLE (1)
-#endif
-#endif
-
-#ifndef CONFIG_CNSS_WCN6450
+#if !defined(CONFIG_CNSS_QCA6750) && !defined(CONFIG_CNSS_WCN6450)
 #ifdef CONFIG_DIRECT_BUF_RX_ENABLE
 #define DBR_MULTI_SRNG_ENABLE (1)
 #endif
@@ -926,6 +920,10 @@
 
 #ifdef CONFIG_WLAN_SYSFS_RF_TEST_MODE
 #define FEATURE_SYSFS_RF_TEST_MODE (1)
+#endif
+
+#ifdef CONFIG_WLAN_SYSFS_BITRATES
+#define WLAN_SYSFS_BITRATES (1)
 #endif
 
 #ifdef CONFIG_RX_PERFORMANCE
@@ -1884,22 +1882,6 @@
 
 #ifdef CONFIG_WLAN_FEATURE_SAP_ACS_OPTIMIZE
 #define WLAN_FEATURE_SAP_ACS_OPTIMIZE (1)
-#endif
-
-#ifdef CONFIG_WLAN_FEATURE_NO_STA_SAP_CONCURRENCY
-#define WLAN_FEATURE_NO_STA_SAP_CONCURRENCY (1)
-#endif
-
-#ifdef CONFIG_WLAN_FEATURE_NO_STA_NAN_CONCURRENCY
-#define WLAN_FEATURE_NO_STA_NAN_CONCURRENCY (1)
-#endif
-
-#ifdef CONFIG_WLAN_FEATURE_NO_P2P_CONCURRENCY
-#define WLAN_FEATURE_NO_P2P_CONCURRENCY (1)
-#endif
-
-#ifdef CONFIG_WLAN_FEATURE_NO_SAP_NAN_CONCURRENCY
-#define WLAN_FEATURE_NO_SAP_NAN_CONCURRENCY (1)
 #endif
 
 #ifdef CONFIG_VERBOSE_DEBUG
@@ -2923,6 +2905,10 @@
 #ifdef CONFIG_QDF_TIMER_MULTIPLIER_FRAC
 #define QDF_TIMER_MULTIPLIER_FRAC CONFIG_QDF_TIMER_MULTIPLIER_FRAC
 #endif
+#endif
+
+#ifdef CONFIG_FEATURE_BLACKLIST_MGR
+#define FEATURE_BLACKLIST_MGR (1)
 #endif
 
 #endif /* CONFIG_TO_FEATURE_H */

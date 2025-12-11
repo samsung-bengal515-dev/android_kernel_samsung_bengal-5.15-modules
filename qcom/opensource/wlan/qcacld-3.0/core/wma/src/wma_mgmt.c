@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2013-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -823,10 +823,14 @@ void wma_set_sta_keep_alive(tp_wma_handle wma, uint8_t vdev_id,
 	params.timeperiod = timeperiod;
 	if (intr) {
 		if (intr->bss_max_idle_period) {
-			params.timeperiod = intr->bss_max_idle_period;
+			if (intr->bss_max_idle_period < timeperiod)
+				params.timeperiod = intr->bss_max_idle_period;
+
 			if (method == WMI_KEEP_ALIVE_NULL_PKT)
 				params.method = WMI_KEEP_ALIVE_MGMT_FRAME;
 		}
+
+		wlan_mlme_set_keepalive_period(intr->vdev, params.timeperiod);
 	}
 
 	if (hostv4addr)
@@ -2991,6 +2995,12 @@ void wma_process_update_opmode(tp_wma_handle wma_handle,
 	wma_set_peer_param(wma_handle, update_vht_opmode->peer_mac,
 			   WMI_PEER_CHWIDTH, update_vht_opmode->opMode,
 			   update_vht_opmode->smesessionId);
+
+	/* send PHYmode only for 11ax capable targets */
+	if (IS_FEATURE_SUPPORTED_BY_FW(DOT11AX))
+		wma_set_peer_param(wma_handle, update_vht_opmode->peer_mac,
+				   WMI_PEER_PHYMODE,
+				   fw_phymode, update_vht_opmode->smesessionId);
 }
 
 /**

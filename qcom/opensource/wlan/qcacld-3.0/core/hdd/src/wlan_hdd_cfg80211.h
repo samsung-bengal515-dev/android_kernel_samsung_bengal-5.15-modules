@@ -34,6 +34,47 @@
 
 struct hdd_context;
 
+#define CONFIG_MAX QCA_WLAN_VENDOR_ATTR_ADJUST_TX_POWER_CONFIG_MAX
+#define RATE_TYPE QCA_WLAN_VENDOR_ATTR_ADJUST_TX_POWER_RATE_TYPE
+#define RATE_VALUE QCA_WLAN_VENDOR_ATTR_ADJUST_TX_POWER_RATE_VALUE
+#define RATE_POWER_VALUE QCA_WLAN_VENDOR_ATTR_ADJUST_TX_POWER_RATE_POWER_VALUE
+
+#define CHAIN_MAX QCA_WLAN_VENDOR_ATTR_ADJUST_TX_POWER_CONFIG_MAX
+#define CHAIN_INDEX QCA_WLAN_VENDOR_ATTR_ADJUST_TX_POWER_CHAIN_INDEX
+#define CHAIN_RATE_CONFIG QCA_WLAN_VENDOR_ATTR_ADJUST_TX_POWER_CHAIN_RATE_CONFIG
+
+#define BAND_MAX QCA_WLAN_VENDOR_ATTR_ADJUST_TX_POWER_BAND_MAX
+#define BAND_INDEX QCA_WLAN_VENDOR_ATTR_ADJUST_TX_POWER_BAND_INDEX
+#define BAND_CHAIN_CONFIG QCA_WLAN_VENDOR_ATTR_ADJUST_TX_POWER_BAND_CHAIN_CONFIG
+
+#define ADJUST_TX_POWER_MAX QCA_WLAN_VENDOR_ATTR_ADJUST_TX_POWER_MAX
+#define BAND_CONFIG QCA_WLAN_VENDOR_ATTR_ADJUST_TX_POWER_BAND_CONFIG
+
+#define NUM_LEGACY_RATES_2G 4
+#define NUM_LEGACY_RATES_5G_6G 8
+
+#define RATE_TYPE_LEGACY 0
+#define RATE_TYPE_MCS 1
+#define RATE_MCS13 13
+
+/* 2GHz band legacy rates */
+#define RATE_1 1
+#define RATE_2 2
+#define RATE_5_5 5
+#define RATE_11 11
+
+/* 2GHz/5GHz/6GHz band legacy rates */
+#define RATE_6 6
+#define RATE_9 9
+#define RATE_12 12
+#define RATE_18 18
+#define RATE_24 24
+#define RATE_36 36
+#define RATE_48 48
+#define RATE_54 54
+
+#define INVALID_RATE 255
+
 /* QCA_NL80211_VENDOR_SUBCMD_ROAM policy */
 extern const struct nla_policy wlan_hdd_set_roam_param_policy[
 			QCA_WLAN_VENDOR_ATTR_ROAMING_PARAM_MAX + 1];
@@ -956,4 +997,25 @@ bool wlan_hdd_cfg80211_rx_control_port(struct net_device *dev,
 				       struct sk_buff *skb,
 				       bool unencrypted);
 
+/**
+ * hdd_vdev_send_sta_keep_alive_interval - Send sta keep alive interval to fw
+ * @adapter: HDD adapter pointer
+ * @hdd_ctx: HDD context pointer
+ * @keep_alive_interval: STA keep alive interval
+ *
+ * Return: 0 on success, negative on failure
+ */
+int hdd_vdev_send_sta_keep_alive_interval(struct hdd_adapter *adapter,
+					  struct hdd_context *hdd_ctx,
+					  uint16_t keep_alive_interval);
+
+/**
+ * wlan_hdd_save_sta_keep_alive_interval() - Save STA keep alive interval
+ * @adapter: HDD adapter pointer
+ * @sta_alive_interval: STA keep alive interval
+ *
+ * Return: None.
+ */
+void wlan_hdd_save_sta_keep_alive_interval(struct hdd_adapter *adapter,
+					   uint16_t sta_alive_interval);
 #endif

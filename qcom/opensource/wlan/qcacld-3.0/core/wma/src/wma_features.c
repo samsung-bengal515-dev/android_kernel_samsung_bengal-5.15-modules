@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2013-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -587,6 +587,137 @@ QDF_STATUS wma_set_wisa_params(tp_wma_handle wma_handle,
 
 	return status;
 }
+
+#ifdef FEATURE_WLAN_APF
+/*
+ * get_fw_active_apf_mode() - convert HDD APF mode to FW configurable APF
+ * mode
+ * @mode: APF mode maintained in HDD
+ *
+ * Return: FW configurable BP mode
+ */
+static enum wmi_host_active_apf_mode
+get_fw_active_apf_mode(enum active_apf_mode mode)
+{
+	switch (mode) {
+	case ACTIVE_APF_DISABLED:
+		return WMI_HOST_ACTIVE_APF_DISABLED;
+	case ACTIVE_APF_ENABLED:
+		return WMI_HOST_ACTIVE_APF_ENABLED;
+	case ACTIVE_APF_ADAPTIVE:
+		return WMI_HOST_ACTIVE_APF_ADAPTIVE;
+	default:
+		wma_err("Invalid Active APF Mode %d; Using 'disabled'", mode);
+		return WMI_HOST_ACTIVE_APF_DISABLED;
+	}
+}
+
+QDF_STATUS wma_enable_active_apf_mode(WMA_HANDLE handle, tAniDHCPInd *ta_dhcp_ind)
+{
+	tp_wma_handle wma_handle = (tp_wma_handle) handle;
+	enum wmi_host_active_apf_mode uc_mode, mcbc_mode;
+	struct vdev_mlme_obj *vdev_mlme;
+	struct wlan_objmgr_vdev *vdev;
+	uint8_t vdev_id;
+	QDF_STATUS ret = QDF_STATUS_SUCCESS;
+
+	if (!ta_dhcp_ind) {
+		wma_err("DHCP indication is NULL");
+		return QDF_STATUS_E_FAILURE;
+	}
+	wma_debug("Enabling active apf mode");
+
+	if (wma_find_vdev_id_by_addr(wma_handle,
+				     ta_dhcp_ind->adapterMacAddr.bytes,
+				     &vdev_id)) {
+		wma_err("Failed to find vdev id for DHCP indication");
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	vdev = wlan_objmgr_get_vdev_by_id_from_psoc(wma_handle->psoc,
+						    vdev_id,
+						    WLAN_LEGACY_WMA_ID);
+	if (!vdev)
+		return -EINVAL;
+
+	vdev_mlme = wlan_vdev_mlme_get_cmpt_obj(vdev);
+	if (!vdev_mlme) {
+		wma_err("Failed to get vdev mlme obj!");
+		ret = -EINVAL;
+		goto release_ref_and_return;
+	}
+	if (vdev_mlme->mgmt.generic.type == WMI_VDEV_TYPE_STA &&
+	    ucfg_pmo_is_apf_enabled(wma_handle->psoc)) {
+		uc_mode = get_fw_active_apf_mode(wma_handle->active_uc_apf_mode);
+		mcbc_mode = get_fw_active_apf_mode(wma_handle->active_mc_bc_apf_mode);
+		wma_debug("Configuring Active APF Mode UC:%d MC/BC:%d for vdev %u",
+			  uc_mode, mcbc_mode, vdev_id);
+
+		ret = wmi_unified_set_active_apf_mode_cmd(wma_handle->wmi_handle, vdev_id,
+							  uc_mode, mcbc_mode);
+
+		if (QDF_IS_STATUS_ERROR(ret))
+			wma_err("Failed to configure active APF mode");
+	}
+release_ref_and_return:
+	wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_WMA_ID);
+	return ret;
+}
+
+QDF_STATUS wma_disable_active_apf_mode(WMA_HANDLE handle, tAniDHCPInd *ta_dhcp_ind)
+{
+	tp_wma_handle wma_handle = (tp_wma_handle)handle;
+	enum wmi_host_active_apf_mode uc_mode, mcbc_mode;
+	struct vdev_mlme_obj *vdev_mlme;
+	struct wlan_objmgr_vdev *vdev;
+	uint8_t vdev_id;
+	QDF_STATUS ret = QDF_STATUS_SUCCESS;
+
+	if (!ta_dhcp_ind) {
+		wma_err("DHCP indication is NULL");
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	wma_debug("Disabling active apf mode");
+
+	if (wma_find_vdev_id_by_addr(wma_handle,
+				     ta_dhcp_ind->adapterMacAddr.bytes,
+				     &vdev_id)) {
+		wma_err("Failed to find vdev id for DHCP indication");
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	vdev = wlan_objmgr_get_vdev_by_id_from_psoc(wma_handle->psoc,
+						    vdev_id,
+						    WLAN_LEGACY_WMA_ID);
+	if (!vdev)
+		return -EINVAL;
+
+	vdev_mlme = wlan_vdev_mlme_get_cmpt_obj(vdev);
+	if (!vdev_mlme) {
+		wma_err("Failed to get vdev mlme obj!");
+		ret = -EINVAL;
+		goto release_ref_and_return;
+	}
+	if (vdev_mlme->mgmt.generic.type == WMI_VDEV_TYPE_STA &&
+	    ucfg_pmo_is_apf_enabled(wma_handle->psoc)) {
+		uc_mode = WMI_HOST_ACTIVE_APF_DISABLED;
+		mcbc_mode = WMI_HOST_ACTIVE_APF_DISABLED;
+
+		wma_debug("Configuring Active APF Mode UC:%d MC/BC:%d for vdev %u",
+			  uc_mode, mcbc_mode, vdev_id);
+
+		ret = wmi_unified_set_active_apf_mode_cmd(wma_handle->wmi_handle, vdev_id,
+							  uc_mode, mcbc_mode);
+
+		if (QDF_IS_STATUS_ERROR(ret))
+			wma_err("Failed to configure active APF mode");
+	}
+release_ref_and_return:
+	wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_WMA_ID);
+	return ret;
+}
+#endif /* FEATURE_WLAN_APF */
 
 /**
  * wma_process_dhcp_ind() - process dhcp indication from SME
@@ -2982,6 +3113,9 @@ int wma_wow_wakeup_host_event(void *handle, uint8_t *event, uint32_t len)
 	WMI_WOW_WAKEUP_HOST_EVENTID_param_tlvs *event_param;
 	WOW_EVENT_INFO_fixed_param *wake_info;
 
+	if (!wma || !wma->psoc)
+		return -EINVAL;
+
 	event_param = (WMI_WOW_WAKEUP_HOST_EVENTID_param_tlvs *)event;
 	if (!event_param) {
 		wma_err("Wake event data is null");
@@ -4741,6 +4875,27 @@ QDF_STATUS wma_set_sar_limit(WMA_HANDLE handle,
 
 	ret = wmi_unified_send_sar_limit_cmd(wmi_handle,
 				sar_limit_params);
+
+	return ret;
+}
+
+QDF_STATUS wma_set_tx_power_per_mcs(
+			   WMA_HANDLE handle,
+			   struct tx_power_per_mcs_rate *txpower_adjust_params)
+{
+	int ret;
+	tp_wma_handle wma = (tp_wma_handle) handle;
+	struct wmi_unified *wmi_handle;
+
+	if (wma_validate_handle(wma))
+		return QDF_STATUS_E_INVAL;
+
+	wmi_handle = wma->wmi_handle;
+	if (wmi_validate_handle(wmi_handle))
+		return QDF_STATUS_E_INVAL;
+
+	ret = wmi_unified_send_tx_power_per_mcs_cmd(wmi_handle,
+						    txpower_adjust_params);
 
 	return ret;
 }

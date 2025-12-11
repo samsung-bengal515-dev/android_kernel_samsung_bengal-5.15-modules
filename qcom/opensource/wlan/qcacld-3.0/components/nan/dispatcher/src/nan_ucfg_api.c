@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -975,7 +975,6 @@ QDF_STATUS
 ucfg_nan_disable_ndi(struct wlan_objmgr_psoc *psoc, uint32_t ndi_vdev_id)
 {
 	enum nan_datapath_state curr_ndi_state;
-	struct nan_datapath_host_event *event;
 	struct nan_vdev_priv_obj *ndi_vdev_priv;
 	struct nan_datapath_end_all_ndps req = {0};
 	struct wlan_objmgr_vdev *ndi_vdev;
@@ -983,7 +982,7 @@ ucfg_nan_disable_ndi(struct wlan_objmgr_psoc *psoc, uint32_t ndi_vdev_id)
 	QDF_STATUS status;
 	int err;
 	static const struct osif_request_params params = {
-		.priv_size = sizeof(struct nan_datapath_host_event),
+		.priv_size = 0,
 		.timeout_ms = 1000,
 	};
 
@@ -1042,18 +1041,11 @@ ucfg_nan_disable_ndi(struct wlan_objmgr_psoc *psoc, uint32_t ndi_vdev_id)
 		goto cleanup;
 	}
 
-	event = osif_request_priv(request);
-	if (!event->ndp_termination_in_progress) {
-		nan_err("Failed to terminate NDP's on NDI");
-		status = QDF_STATUS_E_FAILURE;
-	} else {
-		/*
-		 * Host can assume NDP delete is successful and
-		 * remove policy mgr entry
-		 */
-		policy_mgr_decr_session_set_pcl(psoc, QDF_NDI_MODE,
-						ndi_vdev_id);
-	}
+	/*
+	 * Host can assume NDP delete is successful and
+	 * remove policy mgr entry
+	 */
+	policy_mgr_decr_session_set_pcl(psoc, QDF_NDI_MODE, ndi_vdev_id);
 
 cleanup:
 	/* Restore original NDI state in case of failure */
@@ -1285,12 +1277,6 @@ bool ucfg_nan_is_beamforming_supported(struct wlan_objmgr_psoc *psoc)
 }
 
 static inline bool
-ucfg_is_nan_enabled(struct nan_psoc_priv_obj *psoc_nan_obj)
-{
-	return psoc_nan_obj->cfg_param.enable;
-}
-
-static inline bool
 ucfg_nan_is_vdev_creation_supp_by_fw(struct nan_psoc_priv_obj *psoc_nan_obj)
 {
 	return psoc_nan_obj->nan_caps.nan_vdev_allowed;
@@ -1361,7 +1347,7 @@ bool ucfg_nan_is_vdev_creation_allowed(struct wlan_objmgr_psoc *psoc)
 		return false;
 	}
 
-	if (!ucfg_is_nan_enabled(psoc_nan_obj)) {
+	if (!nan_is_allowed(psoc)) {
 		nan_debug("NAN is not enabled");
 		return false;
 	}
@@ -1455,4 +1441,9 @@ bool ucfg_is_nan_allowed_on_freq(struct wlan_objmgr_pdev *pdev, uint32_t freq)
 bool ucfg_is_mlo_sta_nan_ndi_allowed(struct wlan_objmgr_psoc *psoc)
 {
 	return wlan_is_mlo_sta_nan_ndi_allowed(psoc);
+}
+
+bool ucfg_nan_is_allowed(struct wlan_objmgr_psoc *psoc)
+{
+	return nan_is_allowed(psoc);
 }

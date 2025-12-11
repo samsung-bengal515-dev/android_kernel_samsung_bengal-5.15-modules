@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -97,10 +97,6 @@
 #else
 #define HDD_SSR_BRING_UP_TIME 30000
 #endif
-
-#ifdef SEC_CONFIG_POWER_BACKOFF
-extern int cur_sec_sar_index;
-#endif /* SEC_CONFIG_POWER_BACKOFF */
 
 /* Type declarations */
 
@@ -2108,9 +2104,6 @@ QDF_STATUS hdd_wlan_re_init(void)
 	if (value)
 		hdd_ssr_restart_sap(hdd_ctx);
 	hdd_wlan_ssr_reinit_event();
-#ifdef SEC_CONFIG_POWER_BACKOFF
-	cur_sec_sar_index = 0;
-#endif /* SEC_CONFIG_POWER_BACKOFF */
 
 	if (hdd_ctx->is_wiphy_suspended)
 		hdd_ctx->is_wiphy_suspended = false;
@@ -3266,9 +3259,16 @@ static int __wlan_hdd_cfg80211_get_txpower(struct wiphy *wiphy,
 	return 0;
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0))
 int wlan_hdd_cfg80211_get_txpower(struct wiphy *wiphy,
-					 struct wireless_dev *wdev,
-					 int *dbm)
+				  struct wireless_dev *wdev,
+				  unsigned int link_id,
+				  int *dbm)
+#else
+int wlan_hdd_cfg80211_get_txpower(struct wiphy *wiphy,
+				  struct wireless_dev *wdev,
+				  int *dbm)
+#endif
 {
 	struct osif_psoc_sync *psoc_sync;
 	int errno;

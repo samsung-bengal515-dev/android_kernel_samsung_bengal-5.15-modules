@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -1914,7 +1914,6 @@ static bool lim_update_sta_ds(struct mac_context *mac_ctx, tSirMacAddr sa,
  * lim_update_sta_ctx() - add/del sta depending on connection state machine
  * @mac_ctx: pointer to Global MAC structure
  * @session: pointer to pe session entry
- * @assoc_req: pointer to ASSOC/REASSOC Request frame
  * @sub_type: Assoc(=0) or Reassoc(=1) Requestframe
  * @sta_ds: station dph entry
  * @update_ctx: indicates if STA context already exist
@@ -1924,7 +1923,7 @@ static bool lim_update_sta_ds(struct mac_context *mac_ctx, tSirMacAddr sa,
  * Return: true of no error, false otherwise
  */
 static bool lim_update_sta_ctx(struct mac_context *mac_ctx, struct pe_session *session,
-			       tpSirAssocReq assoc_req, uint8_t sub_type,
+			       uint8_t sub_type,
 			       tpDphHashNode sta_ds, uint8_t update_ctx)
 {
 	tLimMlmStates mlm_prev_state;
@@ -1955,9 +1954,6 @@ static bool lim_update_sta_ctx(struct mac_context *mac_ctx, struct pe_session *s
 				STATUS_UNSPECIFIED_FAILURE,
 				session);
 
-			if (session->parsedAssocReq)
-				assoc_req =
-				    session->parsedAssocReq[sta_ds->assocId];
 			return false;
 		}
 	} else {
@@ -1989,9 +1985,6 @@ static bool lim_update_sta_ctx(struct mac_context *mac_ctx, struct pe_session *s
 
 				/* Restoring the state back. */
 				sta_ds->mlmStaContext.mlmState = mlm_prev_state;
-				if (session->parsedAssocReq)
-					assoc_req = session->parsedAssocReq[
-						sta_ds->assocId];
 				return false;
 			}
 		} else {
@@ -2011,9 +2004,6 @@ static bool lim_update_sta_ctx(struct mac_context *mac_ctx, struct pe_session *s
 
 				/* Restoring the state back. */
 				sta_ds->mlmStaContext.mlmState = mlm_prev_state;
-				if (session->parsedAssocReq)
-					assoc_req = session->parsedAssocReq[
-							sta_ds->assocId];
 				return false;
 			}
 		}
@@ -2023,20 +2013,14 @@ static bool lim_update_sta_ctx(struct mac_context *mac_ctx, struct pe_session *s
 
 void lim_process_assoc_cleanup(struct mac_context *mac_ctx,
 			       struct pe_session *session,
-			       tpSirAssocReq assoc_req,
 			       tpDphHashNode sta_ds,
 			       bool assoc_req_copied)
 {
 	tpSirAssocReq tmp_assoc_req;
 
-	if (assoc_req) {
-		lim_free_assoc_req_frm_buf(assoc_req);
-
-		qdf_mem_free(assoc_req);
-		/* to avoid double free */
-		if (assoc_req_copied && session->parsedAssocReq && sta_ds)
-			session->parsedAssocReq[sta_ds->assocId] = NULL;
-	}
+	/* to avoid double free */
+	if (assoc_req_copied && session->parsedAssocReq && sta_ds)
+		session->parsedAssocReq[sta_ds->assocId] = NULL;
 
 	/* If it is not duplicate Assoc request then only make to Null */
 	if ((sta_ds) &&
@@ -2092,9 +2076,10 @@ static void lim_defer_sme_indication(struct mac_context *mac_ctx,
 		pe_debug("Free the cached assoc req as a new one is received");
 		cached_req = &sta_pre_auth_ctx->assoc_req;
 		lim_process_assoc_cleanup(mac_ctx, session,
-					  cached_req->assoc_req,
 					  cached_req->sta_ds,
 					  cached_req->assoc_req_copied);
+		lim_free_assoc_req_frm_buf(cached_req->assoc_req);
+		qdf_mem_free(cached_req->assoc_req);
 	}
 
 	sta_pre_auth_ctx->assoc_req.present = true;
@@ -2259,7 +2244,7 @@ send_ind_to_sme:
 
 	/* If it is duplicate entry wait till the peer is deleted */
 	if (!dup_entry) {
-		if (!lim_update_sta_ctx(mac_ctx, session, assoc_req,
+		if (!lim_update_sta_ctx(mac_ctx, session,
 					sub_type, sta_ds, update_ctx))
 			return false;
 	}
@@ -2530,8 +2515,7 @@ QDF_STATUS lim_proc_assoc_req_frm_cmn(struct mac_context *mac_ctx,
 	return QDF_STATUS_SUCCESS;
 
 error:
-	lim_process_assoc_cleanup(mac_ctx, session, assoc_req, sta_ds,
-				  assoc_req_copied);
+	lim_process_assoc_cleanup(mac_ctx, session, sta_ds, assoc_req_copied);
 
 	return QDF_STATUS_E_FAILURE;
 }
@@ -2560,6 +2544,7 @@ void lim_process_assoc_req_frame(struct mac_context *mac_ctx,
 	tpDphHashNode sta_ds = NULL;
 	struct wlan_objmgr_vdev *vdev;
 	tpSirAssocReq assoc_req;
+	QDF_STATUS status;
 
 	hdr = WMA_GET_RX_MAC_HEADER(rx_pkt_info);
 	frame_len = WMA_GET_RX_PAYLOAD_LEN(rx_pkt_info);
@@ -2679,8 +2664,10 @@ void lim_process_assoc_req_frame(struct mac_context *mac_ctx,
 					 frame_len))
 		goto error;
 
-	lim_proc_assoc_req_frm_cmn(mac_ctx, sub_type, session, hdr->sa,
-				   assoc_req, 0);
+	status = lim_proc_assoc_req_frm_cmn(mac_ctx, sub_type, session, hdr->sa,
+					    assoc_req, 0);
+	if (QDF_IS_STATUS_ERROR(status))
+		goto error;
 
 	return;
 error:

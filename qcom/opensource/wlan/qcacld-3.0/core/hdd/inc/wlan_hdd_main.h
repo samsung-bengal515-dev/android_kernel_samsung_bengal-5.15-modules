@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -819,10 +819,10 @@ struct hdd_stats {
 	struct hdd_eapol_stats_s hdd_eapol_stats;
 	struct hdd_dhcp_stats_s hdd_dhcp_stats;
 	struct pmf_bcn_protect_stats bcn_protect_stats;
+	qdf_atomic_t is_ll_stats_req_pending;
 
 #ifdef FEATURE_CLUB_LL_STATS_AND_GET_STATION
 	uint32_t sta_stats_cached_timestamp;
-	bool is_ll_stats_req_in_progress;
 #endif
 };
 
@@ -1291,6 +1291,7 @@ enum qdisc_filter_status {
  * @mon_adapter: hdd_adapter of monitor mode.
  * @set_mac_addr_req_ctx: Set MAC address command request context
  * @delta_qtime: delta between host qtime and monotonic time
+ * @keep_alive_interval: user configured STA keep alive interval
  */
 struct hdd_adapter {
 	/* Magic cookie for adapter sanity verification.  Note that this
@@ -1630,6 +1631,7 @@ struct hdd_adapter {
 	void *set_mac_addr_req_ctx;
 #endif
 	int64_t delta_qtime;
+	uint16_t keep_alive_interval;
 };
 
 #define WLAN_HDD_GET_STATION_CTX_PTR(adapter) (&(adapter)->session.station)
@@ -1997,6 +1999,7 @@ struct hdd_rtpm_tput_policy_context {
  * @bus_bw_work: work for periodically computing DDR bus bandwidth requirements
  * @g_event_flags: a bitmap of hdd_driver_flags
  * @psoc_idle_timeout_work: delayed work for psoc idle shutdown
+ * @sar_flag: SAR flags supported by firmware
  * @dynamic_nss_chains_support: Per vdev dynamic nss chains update capability
  * @sar_cmd_params: SAR command params to be configured to the FW
  * @country_change_work: work for updating vdev when country changes
@@ -2018,6 +2021,7 @@ struct hdd_rtpm_tput_policy_context {
  * @hdd_dual_sta_policy: Concurrent STA policy configuration
  * @last_pagefault_ssr_time: Time when last recovery was triggered because of
  * @host wakeup from fw with reason as pagefault
+ * @combination: interface combination register to wiphy
  */
 struct hdd_context {
 	struct wlan_objmgr_psoc *psoc;
@@ -2314,6 +2318,7 @@ struct hdd_context {
 	qdf_mutex_t cache_channel_lock;
 #endif
 	enum sar_version sar_version;
+	enum sar_flag sar_flag;
 	struct hdd_dynamic_mac dynamic_mac_list[QDF_MAX_CONCURRENCY_PERSONA];
 	bool dynamic_nss_chains_support;
 	struct qdf_mac_addr hw_macaddr;
@@ -2381,10 +2386,6 @@ struct hdd_context {
 #ifdef WLAN_SUPPORT_TWT
 	qdf_work_t twt_en_dis_work;
 #endif
-#ifdef SEC_CONFIG_WLAN_BEACON_CHECK
-	qdf_mc_timer_t skip_bmiss_set_timer;
-	bool bmiss_set_last;
-#endif /* SEC_CONFIG_WLAN_BEACON_CHECK */
 	bool is_wifi3_0_target;
 	bool dump_in_progress;
 	uint64_t bw_vote_time;
@@ -2402,6 +2403,7 @@ struct hdd_context {
 	uint8_t power_type;
 #endif
 	qdf_time_t last_pagefault_ssr_time;
+	struct ieee80211_iface_combination *combination;
 };
 
 /**
@@ -5362,5 +5364,23 @@ static inline int hdd_set_suspend_mode(struct hdd_context *hdd_ctx)
  * Return: none
  */
 void hdd_update_multicast_list(struct wlan_objmgr_vdev *vdev);
+
+/**
+ * wlan_hdd_alloc_iface_combination_mem() - This API will allocate memory for
+ * interface combinations
+ * @hdd_ctx: HDD context
+ *
+ * Return: 0 on success and -ENOMEM on failure
+ */
+int wlan_hdd_alloc_iface_combination_mem(struct hdd_context *hdd_ctx);
+
+/**
+ * wlan_hdd_free_iface_combination_mem() - This API will free memory for
+ * interface combinations
+ * @hdd_ctx: HDD context
+ *
+ * Return: none
+ */
+void wlan_hdd_free_iface_combination_mem(struct hdd_context *hdd_ctx);
 
 #endif /* end #if !defined(WLAN_HDD_MAIN_H) */

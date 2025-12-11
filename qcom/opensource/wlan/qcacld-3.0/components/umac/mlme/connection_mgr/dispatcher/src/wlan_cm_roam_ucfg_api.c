@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -26,18 +26,9 @@
 #include "../../core/src/wlan_cm_roam_offload.h"
 #include "wlan_reg_ucfg_api.h"
 
-bool ucfg_is_roaming_enabled(struct wlan_objmgr_pdev *pdev, uint8_t vdev_id)
+bool ucfg_is_rso_enabled(struct wlan_objmgr_pdev *pdev, uint8_t vdev_id)
 {
-	struct wlan_objmgr_psoc *psoc = wlan_pdev_get_psoc(pdev);
-	enum roam_offload_state cur_state;
-
-	cur_state = mlme_get_roam_state(psoc, vdev_id);
-	if (cur_state == WLAN_ROAM_RSO_ENABLED ||
-	    cur_state == WLAN_ROAMING_IN_PROG ||
-	    cur_state == WLAN_ROAM_SYNCH_IN_PROG)
-		return true;
-
-	return false;
+	return wlan_is_rso_enabled(pdev, vdev_id);
 }
 
 QDF_STATUS
@@ -113,30 +104,15 @@ QDF_STATUS ucfg_cm_abort_roam_scan(struct wlan_objmgr_pdev *pdev,
 	QDF_STATUS status;
 	struct wlan_objmgr_psoc *psoc = wlan_pdev_get_psoc(pdev);
 	bool roam_scan_offload_enabled;
-	struct wlan_objmgr_vdev *vdev;
 
 	ucfg_mlme_is_roam_scan_offload_enabled(psoc,
 					       &roam_scan_offload_enabled);
 	if (!roam_scan_offload_enabled)
 		return QDF_STATUS_SUCCESS;
 
-	vdev = wlan_objmgr_get_vdev_by_id_from_pdev(pdev, vdev_id,
-						    WLAN_MLME_CM_ID);
-	if (!vdev) {
-		mlme_err("vdev object is NULL");
-		return QDF_STATUS_E_INVAL;
-	}
-	status = cm_roam_acquire_lock(vdev);
-	if (QDF_IS_STATUS_ERROR(status))
-		goto release_ref;
-
 	status = cm_roam_send_rso_cmd(psoc, vdev_id,
 				      ROAM_SCAN_OFFLOAD_ABORT_SCAN,
 				      REASON_ROAM_ABORT_ROAM_SCAN);
-	cm_roam_release_lock(vdev);
-
-release_ref:
-	wlan_objmgr_vdev_release_ref(vdev, WLAN_MLME_CM_ID);
 
 	return status;
 }

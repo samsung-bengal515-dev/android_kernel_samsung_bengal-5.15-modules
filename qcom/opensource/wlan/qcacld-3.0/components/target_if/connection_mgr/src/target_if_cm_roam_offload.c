@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -305,6 +305,41 @@ target_if_cm_roam_rssi_diff_6ghz(struct wlan_objmgr_vdev *vdev,
 	return status;
 }
 
+/**
+ * target_if_cm_roam_rssi_delta_6ghz_to_non_6ghz() - Sends the roam RSSI
+ * diff value to the FW. This value is used to determine how much better
+ * the RSSI of the new/roamable non-6 GHz AP must be for roaming.
+ *
+ * @vdev: vdev object
+ * @roam_rssi_delta_6ghz_to_non_6ghz: RSSI diff value to be used for roaming to
+ * Non 6 GHz AP
+ *
+ * Return: QDF_STATUS
+ */
+static QDF_STATUS
+target_if_cm_roam_rssi_delta_6ghz_to_non_6ghz(struct wlan_objmgr_vdev *vdev,
+					      uint8_t roam_rssi_delta_6ghz_to_non_6ghz)
+{
+	QDF_STATUS status = QDF_STATUS_E_FAILURE;
+	uint8_t vdev_id;
+	wmi_unified_t wmi_handle;
+
+	wmi_handle = target_if_cm_roam_get_wmi_handle_from_vdev(vdev);
+	if (!wmi_handle)
+		return status;
+
+	vdev_id = wlan_vdev_get_id(vdev);
+	status = target_if_roam_set_param(
+			wmi_handle, vdev_id,
+			WMI_ROAM_PARAM_ROAM_RSSI_PENALTY_FOR_NON_6GHZ_CAND_AP,
+			roam_rssi_delta_6ghz_to_non_6ghz);
+
+	if (QDF_IS_STATUS_ERROR(status))
+		target_if_err("Failed to set WMI_ROAM_PARAM_ROAM_RSSI_PENALTY_FOR_NON_6GHZ_CAND_AP");
+
+	return status;
+}
+
 static QDF_STATUS
 target_if_cm_roam_scan_offload_rssi_thresh(
 				wmi_unified_t wmi_handle,
@@ -406,6 +441,13 @@ target_if_cm_roam_full_scan_6ghz_on_disc(struct wlan_objmgr_vdev *vdev,
 static QDF_STATUS
 target_if_cm_roam_rssi_diff_6ghz(struct wlan_objmgr_vdev *vdev,
 				 uint8_t roam_rssi_diff_6ghz)
+{
+	return QDF_STATUS_E_NOSUPPORT;
+}
+
+static QDF_STATUS
+target_if_cm_roam_rssi_delta_6ghz_to_non_6ghz(struct wlan_objmgr_vdev *vdev,
+					      uint8_t roam_rssi_diff_6ghz)
 {
 	return QDF_STATUS_E_NOSUPPORT;
 }
@@ -626,7 +668,7 @@ target_if_cm_roam_disconnect_params(wmi_unified_t wmi_handle, uint8_t command,
  *
  * Return: void
  */
-static void
+static QDF_STATUS
 target_if_cm_roam_idle_params(wmi_unified_t wmi_handle, uint8_t command,
 			      struct wlan_roam_idle_params *req)
 {
@@ -654,6 +696,8 @@ target_if_cm_roam_idle_params(wmi_unified_t wmi_handle, uint8_t command,
 	status = wmi_unified_send_idle_roam_params(wmi_handle, req);
 	if (QDF_IS_STATUS_ERROR(status))
 		target_if_err("failed to send idle roam parameters");
+
+	return status;
 }
 #else
 static void
@@ -682,10 +726,11 @@ target_if_cm_roam_disconnect_params(wmi_unified_t wmi_handle, uint8_t command,
 {
 }
 
-static void
+static QDF_STATUS
 target_if_cm_roam_idle_params(wmi_unified_t wmi_handle, uint8_t command,
 			      struct wlan_roam_idle_params *req)
 {
+	return QDF_STATUS_E_NOSUPPORT;
 }
 #endif
 
@@ -1334,6 +1379,9 @@ target_if_cm_roam_send_start(struct wlan_objmgr_vdev *vdev,
 	if (req->wlan_roam_rssi_diff_6ghz)
 		target_if_cm_roam_rssi_diff_6ghz(vdev,
 						 req->wlan_roam_rssi_diff_6ghz);
+	if (req->wlan_roam_rssi_delta_6ghz_to_non_6ghz)
+		target_if_cm_roam_rssi_delta_6ghz_to_non_6ghz(
+			vdev, req->wlan_roam_rssi_delta_6ghz_to_non_6ghz);
 
 	/* add other wmi commands */
 end:
@@ -1717,8 +1765,38 @@ target_if_cm_roam_send_update_config(struct wlan_objmgr_vdev *vdev,
 		if (req->wlan_roam_rssi_diff_6ghz)
 			target_if_cm_roam_rssi_diff_6ghz(
 					vdev, req->wlan_roam_rssi_diff_6ghz);
+
+		if (req->wlan_roam_rssi_delta_6ghz_to_non_6ghz)
+			target_if_cm_roam_rssi_delta_6ghz_to_non_6ghz(
+			vdev, req->wlan_roam_rssi_delta_6ghz_to_non_6ghz);
 	}
 end:
+	return status;
+}
+
+/**
+ * target_if_cm_roam_update_freqs() - Send roam frequencies to fw
+ * @vdev: vdev object
+ * @req: roam channels to update to firmware
+ *
+ * Return: QDF_STATUS
+ */
+static QDF_STATUS
+target_if_cm_roam_update_freqs(struct wlan_objmgr_vdev *vdev,
+			       struct wlan_roam_scan_channel_list *req)
+{
+	QDF_STATUS status = QDF_STATUS_SUCCESS;
+	wmi_unified_t wmi_handle;
+
+	wmi_handle = target_if_cm_roam_get_wmi_handle_from_vdev(vdev);
+	if (!wmi_handle)
+		return QDF_STATUS_E_FAILURE;
+
+	status = target_if_cm_roam_offload_chan_list(wmi_handle, req);
+	if (QDF_IS_STATUS_ERROR(status))
+		target_if_err("vdev:%d Send channel list command failed",
+			      req->vdev_id);
+
 	return status;
 }
 
@@ -1833,6 +1911,8 @@ target_if_cm_roam_register_rso_req_ops(struct wlan_cm_roam_tx_ops *tx_ops)
 	tx_ops->send_roam_triggers = target_if_cm_roam_triggers;
 	tx_ops->send_roam_disable_config =
 					target_if_cm_roam_send_disable_config;
+	tx_ops->send_roam_idle_trigger =  target_if_cm_roam_idle_params;
+	tx_ops->send_roam_frequencies = target_if_cm_roam_update_freqs;
 }
 
 QDF_STATUS target_if_cm_roam_register_tx_ops(struct wlan_cm_roam_tx_ops *tx_ops)
