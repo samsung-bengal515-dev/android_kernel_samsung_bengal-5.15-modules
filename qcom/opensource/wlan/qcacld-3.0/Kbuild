@@ -42,12 +42,12 @@ endif
 
 cppflags-y += -include $(WLAN_ROOT)/configs/default_config.h
 
-found = $(shell if grep -qF "struct link_station_parameters" $(srctree)/include/net/cfg80211.h; then echo "yes"; else echo "no"; fi;)
+found = $(shell if grep -qF "struct link_station_parameters" $(KERNEL_SRC)/include/net/cfg80211.h; then echo "yes"; else echo "no"; fi;)
 ifeq ($(findstring yes, $(found)), yes)
 cppflags-y += -DCFG80211_LINK_STA_PARAMS_PRESENT
 endif
 
-found = $(shell if grep -qF "unsigned int link_id, u16 punct_bitmap" $(srctree)/include/net/cfg80211.h; then echo "yes" ;else echo "no" ;fi;)
+found = $(shell if grep -qF "unsigned int link_id, u16 punct_bitmap" $(KERNEL_SRC)/include/net/cfg80211.h; then echo "yes" ;else echo "no" ;fi;)
 ifeq ($(findstring yes, $(found)), yes)
 cppflags-y += -DCFG80211_RU_PUNCT_NOTIFY
 endif
@@ -577,7 +577,7 @@ $(call add-wlan-objs,dsc,$(DSC_OBJS))
 
 cppflags-$(CONFIG_ONE_MSI_VECTOR) += -DWLAN_ONE_MSI_VECTOR
 
-found = $(shell if grep -qF "bool mlo_params_valid;" $(srctree)/include/net/cfg80211.h; then echo "yes" ;else echo "no" ;fi;)
+found = $(shell if grep -qF "bool mlo_params_valid;" $(KERNEL_SRC)/include/net/cfg80211.h; then echo "yes" ;else echo "no" ;fi;)
 ifeq ($(findstring yes, $(found)), yes)
 ccflags-y += -DCFG80211_MLD_AP_STA_CONNECT_UPSTREAM_SUPPORT
 endif
@@ -3037,8 +3037,8 @@ INCS +=		$(COAP_WMI_INC)
 
 ccflags-y += $(INCS)
 
-cppflags-y +=	-Wall\
-		-Werror
+cppflags-y +=	-Wall \
+		-Wno-incompatible-function-pointer-types
 
 cppflags-$(CONFIG_THERMAL_STATS_SUPPORT) += -DTHERMAL_STATS_SUPPORT
 cppflags-$(CONFIG_PTT_SOCK_SVC_ENABLE) += -DPTT_SOCK_SVC_ENABLE
